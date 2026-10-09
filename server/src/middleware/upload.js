@@ -37,7 +37,7 @@ export function uploadFor(kind) {
           const filename = `${path.basename(req.file.filename, '.upload')}.${detected.ext}`;
           const finalPath = path.join(directory, filename);
           await fs.rename(req.file.path, finalPath);
-          req.upload = { url: `${req.protocol}://${req.get('host')}/uploads/${kind}/${filename}`, originalName: path.basename(req.file.originalname), mime: detected.mime };
+          req.upload = { url: `${req.protocol}://${req.get('host')}/api/uploads/${kind}/${filename}`, originalName: path.basename(req.file.originalname), mime: detected.mime };
           next();
         } catch (checkError) {
           await fs.rm(req.file.path, { force: true });

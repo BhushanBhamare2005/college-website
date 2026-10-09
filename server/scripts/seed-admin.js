@@ -4,8 +4,8 @@ import { User } from '../src/models/index.js';
 
 const email = String(process.env.ADMIN_EMAIL || '').trim().toLowerCase();
 const password = process.env.ADMIN_PASSWORD || '';
-if (!email || password.length < 12) {
-  console.error('Set ADMIN_EMAIL and an ADMIN_PASSWORD of at least 12 characters in the environment.');
+if (!email || password.length < 8) {
+  console.error('Set ADMIN_EMAIL and an ADMIN_PASSWORD of at least 8 characters in the environment.');
   process.exit(1);
 }
 

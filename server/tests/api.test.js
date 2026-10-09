@@ -36,9 +36,18 @@ afterAll(async () => {
 describe('API contract and security', () => {
   it('provides public counts and a stable health envelope', async () => {
     const health = await request(app).get('/api/health').expect(200);
-    expect(health.body).toEqual({ success: true, data: { status: 'ok' } });
+    expect(health.body).toEqual({ success: true, data: { status: 'ok', database: 'connected' } });
     const stats = await request(app).get('/api/dashboard/public-stats').expect(200);
     expect(stats.body.data).toEqual({ faculty: 0, courses: 0, labs: 0, events: 0, notices: 0 });
+  });
+
+  it('allows the configured client origin and rejects an unknown origin', async () => {
+    const allowed = await request(app).get('/api/health').set('Origin', 'http://localhost:5173').expect(200);
+    expect(allowed.headers['access-control-allow-origin']).toBe('http://localhost:5173');
+    expect(allowed.headers['access-control-allow-credentials']).toBe('true');
+    const rejected = await request(app).get('/api/health').set('Origin', 'https://untrusted.example').expect(403);
+    expect(rejected.body.message).toBe('Origin is not allowed.');
+    expect(rejected.headers['access-control-allow-origin']).toBeUndefined();
   });
 
   it('rejects a mutation without a matching CSRF header', async () => {

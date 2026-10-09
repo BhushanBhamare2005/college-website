@@ -6,6 +6,7 @@ export function notFound(_req, _res, next) {
 
 export function errorHandler(error, _req, res, _next) {
   if (error?.type === 'entity.parse.failed') return res.status(400).json({ success: false, message: 'Malformed JSON request.' });
+  if (error?.code === 'CORS_ORIGIN_DENIED') return res.status(403).json({ success: false, message: 'Origin is not allowed.' });
   if (error?.type === 'entity.too.large') return res.status(413).json({ success: false, message: 'Request body is too large.' });
   if (error?.code === 11000) return res.status(409).json({ success: false, message: 'A record with these details already exists.' });
   if (error?.name === 'ValidationError') {

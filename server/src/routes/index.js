@@ -15,6 +15,7 @@ import { ApiError } from '../utils/ApiError.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { createCsrfToken } from '../utils/tokens.js';
 import { env } from '../config/env.js';
+import { connectDatabase, databaseReady } from '../config/db.js';
 
 const dummyHash = await bcrypt.hash('timing-protection-only', 12);
 
@@ -27,12 +28,30 @@ const facultyProfileSchema = z.object({
   experience: z.string().trim().max(120).optional(), specialization: z.string().trim().max(200).optional(),
 });
 
-apiRouter.get('/health', (_req, res) => success(res, { status: 'ok' }));
+apiRouter.get('/health', asyncHandler(async (req, res) => {
+  try {
+    await connectDatabase();
+    success(res, { status: 'ok', database: databaseReady() ? 'connected' : 'unavailable' });
+  } catch (error) {
+    req.log?.warn({ databaseError: { name: error.name, code: error.code } }, 'Database health check failed');
+    res.status(503).json({ success: false, message: 'Service temporarily unavailable.', data: { status: 'degraded', database: 'unavailable' } });
+  }
+}));
 apiRouter.get('/auth/csrf', (req, res) => {
   const token = createCsrfToken();
   setCsrfCookie(res, token);
   success(res, { csrfToken: token });
 });
+
+apiRouter.use(asyncHandler(async (req, _res, next) => {
+  try {
+    await connectDatabase();
+    next();
+  } catch (error) {
+    req.log?.error({ databaseError: { name: error.name, code: error.code } }, 'Database unavailable');
+    throw new ApiError(503, 'Service temporarily unavailable.');
+  }
+}));
 
 apiRouter.post('/auth/register', csrfProtection, signupLimiter, validateBody(studentSignupSchema), asyncHandler(async (req, res) => {
   const { name, email, password } = req.validatedBody;
@@ -46,7 +65,7 @@ apiRouter.post('/auth/login', csrfProtection, loginLimiter, validateBody(loginSc
   const user = await User.findOne({ email }).select('+passwordHash name email role accountStatus mustChangePassword');
   const valid = await bcrypt.compare(password, user?.passwordHash || dummyHash);
   if (!user || !valid) throw new ApiError(401, 'Invalid email or password.');
-  if (user.accountStatus !== 'approved') throw new ApiError(403, user.accountStatus === 'rejected' ? 'This account was not approved. Contact the department for help.' : 'Your account is waiting for administrator approval.');
+  if (user.accountStatus && user.accountStatus !== 'approved') throw new ApiError(403, user.accountStatus === 'rejected' ? 'This account was not approved. Contact the department for help.' : 'Your account is waiting for administrator approval.');
   const token = jwt.sign({ sub: String(user._id), role: user.role }, env.JWT_SECRET, { algorithm: 'HS256', expiresIn: '2h' });
   res.cookie('token', token, cookieOptions);
   success(res, { _id: user._id, name: user.name, email: user.email, role: user.role, accountStatus: user.accountStatus, mustChangePassword: user.mustChangePassword });

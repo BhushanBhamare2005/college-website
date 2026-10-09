@@ -17,7 +17,10 @@ app.set('trust proxy', env.NODE_ENV === 'production' ? 1 : false);
 app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
 app.use(cors({ origin: (origin, callback) => {
   if (!origin || env.CLIENT_ORIGINS.includes(origin)) return callback(null, true);
-  callback(new Error('Origin is not allowed by CORS.'));
+  const error = new Error('Origin is not allowed by CORS.');
+  error.code = 'CORS_ORIGIN_DENIED';
+  error.status = 403;
+  callback(error);
 }, credentials: true }));
 app.use(pinoHttp({ enabled: env.NODE_ENV !== 'test', redact: ['req.headers.cookie', 'req.headers.authorization'], serializers: { req: (req) => ({ method: req.method, url: req.url, remoteAddress: req.remoteAddress }) } }));
 app.use(express.json({ limit: '100kb' }));
@@ -26,6 +29,10 @@ app.use(hpp());
 app.use(sanitizeInput);
 app.use('/api', globalLimiter, apiRouter);
 app.use('/uploads', helmet.contentSecurityPolicy({ directives: { defaultSrc: ["'none'"], sandbox: [], 'form-action': ["'none'"] } }), express.static(path.resolve(env.UPLOAD_DIR), { dotfiles: 'deny', index: false, setHeaders: (res, filePath) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  if (filePath.toLowerCase().endsWith('.pdf')) res.setHeader('Content-Disposition', 'inline');
+} }));
+app.use('/api/uploads', helmet.contentSecurityPolicy({ directives: { defaultSrc: ["'none'"], sandbox: [], 'form-action': ["'none'"] } }), express.static(path.resolve(env.UPLOAD_DIR), { dotfiles: 'deny', index: false, setHeaders: (res, filePath) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   if (filePath.toLowerCase().endsWith('.pdf')) res.setHeader('Content-Disposition', 'inline');
 } }));

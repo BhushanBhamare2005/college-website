@@ -49,10 +49,13 @@ export async function listRecords(resource, req) {
     else if (req.user.role === 'faculty') andFilter(filter, { $or: [{ status: 'approved' }, { submittedBy: req.user._id }] });
   }
   const sort = resource === 'notices' ? { pinned: -1, date: -1 } : (sortOptions[req.query.sort] || { createdAt: -1 });
-  const [rows, total] = await Promise.all([
+  const [foundRows, total] = await Promise.all([
     Model.find(filter).sort(sort).skip((page - 1) * limit).limit(limit).select(resource === 'users' ? '-passwordHash' : undefined).lean(),
     Model.countDocuments(filter),
   ]);
+  const rows = resource === 'users'
+    ? foundRows.map((row) => ({ ...row, accountStatus: row.accountStatus || 'approved' }))
+    : foundRows;
   return { data: rows, meta: { page, limit, total, pages: Math.max(1, Math.ceil(total / limit)) } };
 }
 

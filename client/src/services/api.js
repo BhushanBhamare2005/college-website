@@ -4,7 +4,7 @@ import { mock, ApiError } from './mockApi';
 
 export { ApiError };
 export const USE_MOCK = import.meta.env.MODE === 'test' || String(import.meta.env.VITE_USE_MOCK ?? 'false') === 'true';
-const BASE = (import.meta.env.VITE_API_URL || 'http://localhost:5000/api').replace(/\/$/, '');
+const BASE = (import.meta.env.VITE_API_URL || (import.meta.env.PROD ? '' : 'http://localhost:5000/api')).replace(/\/$/, '');
 
 let onUnauthorized = null;
 let csrfToken = null;
@@ -12,6 +12,7 @@ let csrfRequest = null;
 export const setUnauthorizedHandler = (fn) => { onUnauthorized = fn; };
 
 async function getCsrfToken() {
+  if (!BASE) throw new ApiError('The production API URL is not configured.', 0);
   if (csrfToken) return csrfToken;
   if (!csrfRequest) {
     csrfRequest = fetch(`${BASE}/auth/csrf`, { credentials: 'include' })
@@ -34,6 +35,7 @@ function qs(params = {}) {
 }
 
 async function request(path, { method = 'GET', body } = {}) {
+  if (!BASE) throw new ApiError('The production API URL is not configured.', 0);
   let res;
   try {
     const mutating = !['GET', 'HEAD', 'OPTIONS'].includes(method);
