@@ -23,7 +23,7 @@ Students can request an account from the sign-in page. New self-registered accou
 
 ## Vercel and Turso deployment
 
-The Vercel entrypoint is `api/[...path].js`. SQLite files are local-development-only because Vercel's filesystem is ephemeral. Before deploying production, create a persistent Turso database and configure these Production variables in the `college-department-api` Vercel project:
+Vercel runs the exported Express app from `index.js` as one function for all routes. SQLite files are local-development-only because Vercel's filesystem is ephemeral. Before deploying production, create a persistent Turso database and configure these Production variables in the `college-department-api` Vercel project:
 
 - `NODE_ENV=production`
 - `TURSO_DATABASE_URL` (Turso database URL)
@@ -34,6 +34,6 @@ One way to create a Turso database is with its CLI: `turso auth login`, `turso d
 
 Deploy from `server/` with `vercel deploy --prod`. Keep `CLIENT_ORIGINS` restricted to the exact frontend origin. `COOKIE_SAMESITE=none` and `COOKIE_SECURE=true` are set for cross-site production cookies. Allow public access to the production API deployment in Vercel Deployment Protection so browser requests are not redirected to a login page.
 
-After the API health check passes, set the frontend Production variables `VITE_API_URL` to the API origin plus `/api` and `VITE_USE_MOCK=false`, then redeploy the client. The first production administrator must be seeded against the hosted database with `npm run seed:admin` using `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`, `ADMIN_EMAIL`, and a strong `ADMIN_PASSWORD` in the local environment.
+After the API health check passes, set the frontend Production variables `VITE_API_URL` to the API origin and `VITE_USE_MOCK=false`, then redeploy the client. The client appends `/api` automatically. The first production administrator must be seeded against the hosted database with `npm run seed:admin` using `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`, `ADMIN_EMAIL`, and a strong `ADMIN_PASSWORD` in the local environment.
 
 Uploads are stored under `/tmp` on Vercel and are ephemeral; use object storage for persistent production files. Authentication uses a two-hour HS256 HTTP-only cookie plus a double-submit CSRF token. The API intentionally has no public account registration without administrator approval.

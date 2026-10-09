@@ -35,7 +35,7 @@ In `client/.env` set `VITE_USE_MOCK=false` and `VITE_API_URL=http://localhost:50
 See [`server/README.md`](server/README.md) for local SQLite setup, Turso production deployment, admin seeding, backend tests, uploads, and security notes.
 
 ### Vercel preview deployment
-The `client/vercel.json` configuration keeps the frontend in demo mode until the API is connected to a persistent hosted SQL database. Demo data is in-memory and is not saved. To use real accounts and persistent data, configure Turso credentials on the server's Vercel project, verify the API health check reports a connected database, then set the frontend Production variables `VITE_USE_MOCK=false` and `VITE_API_URL` to the API origin plus `/api` and redeploy.
+The frontend uses demo data for Vercel Preview deployments. For Production, configure Turso credentials on the server's Vercel project, verify the API health check reports a connected database, then set `VITE_USE_MOCK=false` and `VITE_API_URL` to the API origin and redeploy. The client appends `/api` automatically.
 
 ## What the frontend contains
 - **Public pages:** Home, About, Faculty (search, filter, profile pages), Academics (courses, laboratories, study material), Notices (search, category filter, pagination, pinned), Events (upcoming/past, registration form, duplicate prevention in demo), Student Corner (projects, achievements, resources, links), Contact (validated form), Login.

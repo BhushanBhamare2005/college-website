@@ -4,7 +4,9 @@ import { mock, ApiError } from './mockApi';
 
 export { ApiError };
 export const USE_MOCK = import.meta.env.MODE === 'test' || String(import.meta.env.VITE_USE_MOCK ?? 'false') === 'true';
-const BASE = (import.meta.env.VITE_API_URL || (import.meta.env.PROD ? '' : 'http://localhost:5000/api')).replace(/\/$/, '');
+const configuredBase = import.meta.env.VITE_API_URL || (import.meta.env.PROD ? '' : 'http://localhost:5000/api');
+const normalizedBase = configuredBase.replace(/\/+$/, '');
+const BASE = normalizedBase && !normalizedBase.endsWith('/api') ? `${normalizedBase}/api` : normalizedBase;
 
 let onUnauthorized = null;
 let csrfToken = null;

@@ -41,3 +41,5 @@ app.use('/api/uploads', helmet.contentSecurityPolicy({ directives: { defaultSrc:
 } }));
 app.use(notFound);
 app.use(errorHandler);
+
+export default app;

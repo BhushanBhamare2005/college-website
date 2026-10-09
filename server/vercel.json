@@ -1,10 +1,4 @@
 {
-  "framework": null,
-  "functions": {
-    "api/[...path].js": {
-      "maxDuration": 30
-    }
-  },
   "env": {
     "CLIENT_ORIGINS": "https://client-steel-eight-50.vercel.app,http://localhost:5173",
     "COOKIE_SAMESITE": "none",
