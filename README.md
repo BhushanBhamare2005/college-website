@@ -1,7 +1,5 @@
 # College Department Website — Electronics & Computer Engineering
-Matoshri College of Engineering and Research Centre, Eklahare, Nashik · T.Y. B.Tech. · Academic Year 2026–2027
 
-Team: Sagar Hukumdar, Sohan Kharate, Yash Khanderay, Arvind Chavan, Achal Kalamkar · Guide: Ms. Harshali Ahire · HOD: Dr J.J Chopda
 
 ## Project status (read this first)
 
