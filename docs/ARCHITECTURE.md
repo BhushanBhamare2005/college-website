@@ -1,7 +1,7 @@
 # Phase 2 – Architecture
 
 ```
-Browser (React SPA) ──► services/api.js ──► Express REST API ──► Mongoose ──► MongoDB
+Browser (React SPA) ──► services/api.js ──► Express REST API ──► SQL repositories ──► SQLite / Turso
         ▲                                         │
         └────────────── JSON response ◄───────────┘
 ```
@@ -15,8 +15,8 @@ Mirrors the report's flow: User → Web Interface → Web Logic → Database →
 | Faculty | + submit notices/resources (pending approval), manage permitted projects |
 | Admin | Full CRUD on all modules, approvals, users and roles |
 
-## Collections (planned for backend phase)
-User, Faculty (report: name, qualification, designation, email + specialization, experience), Course (report: name, duration, description), Laboratory, Notice (title, description, date + category, pinned), Event, EventRegistration (unique event+email), Achievement/StudentProject (approval status), AcademicResource, ContactMessage.
+## SQL tables
+Users, Faculty (report: name, qualification, designation, email + specialization, experience), Courses (report: name, duration, description), Labs, Notices (title, description, date + category, pinned), Events, Registrations (unique event+email), Projects (approval status), Resources, Messages. SQLite is used locally; hosted Turso/libSQL provides persistent production storage.
 
 ## Frontend structure
 `client/src/{components,layouts,pages,context,services,data,utils}`. Public layout and an admin layout with sidebar; routes guarded by role.

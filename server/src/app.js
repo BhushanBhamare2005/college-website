@@ -22,7 +22,10 @@ app.use(cors({ origin: (origin, callback) => {
   error.status = 403;
   callback(error);
 }, credentials: true }));
-app.use(pinoHttp({ enabled: env.NODE_ENV !== 'test', redact: ['req.headers.cookie', 'req.headers.authorization'], serializers: { req: (req) => ({ method: req.method, url: req.url, remoteAddress: req.remoteAddress }) } }));
+app.use(pinoHttp({ enabled: env.NODE_ENV !== 'test', redact: ['req.headers.cookie', 'req.headers.authorization'], serializers: {
+  req: (req) => ({ method: req.method, url: req.url, remoteAddress: req.remoteAddress }),
+  res: (res) => ({ statusCode: res.statusCode }),
+} }));
 app.use(express.json({ limit: '100kb' }));
 app.use(cookieParser());
 app.use(hpp());

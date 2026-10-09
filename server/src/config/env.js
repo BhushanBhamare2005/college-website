@@ -4,7 +4,9 @@ import { z } from 'zod';
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().int().positive().default(5000),
-  MONGO_URI: z.string().min(1).optional(),
+  SQLITE_PATH: z.string().min(1).default('./data/college.db'),
+  TURSO_DATABASE_URL: z.string().min(1).optional(),
+  TURSO_AUTH_TOKEN: z.string().min(1).optional(),
   JWT_SECRET: z.string().min(32, 'JWT_SECRET must be at least 32 characters.'),
   CLIENT_ORIGINS: z.string().default('http://localhost:5173'),
   COOKIE_SAMESITE: z.enum(['lax', 'strict', 'none']).default('lax'),
@@ -18,12 +20,15 @@ if (!parsed.success) {
   throw new Error(`Invalid environment configuration for: ${fields || 'unknown settings'}.`);
 }
 
-const mongoUri = parsed.data.MONGO_URI || (parsed.data.NODE_ENV === 'production' ? '' : 'mongodb://127.0.0.1:27017/college_department');
-if (!mongoUri) throw new Error('MONGO_URI must be configured in production.');
+if (parsed.data.NODE_ENV === 'production' && (!parsed.data.TURSO_DATABASE_URL || !parsed.data.TURSO_AUTH_TOKEN)) {
+  throw new Error('TURSO_DATABASE_URL and TURSO_AUTH_TOKEN must be configured in production.');
+}
+if (parsed.data.NODE_ENV === 'production' && !/^(libsql|https):\/\//.test(parsed.data.TURSO_DATABASE_URL)) {
+  throw new Error('TURSO_DATABASE_URL must use a remote libSQL endpoint in production.');
+}
 
 export const env = {
   ...parsed.data,
-  MONGO_URI: mongoUri,
   COOKIE_SECURE: parsed.data.COOKIE_SECURE === undefined
     ? parsed.data.NODE_ENV === 'production'
     : parsed.data.COOKIE_SECURE === 'true',

@@ -1,5 +1,5 @@
-import { collections } from '../models/index.js';
-import { escapeRegex } from '../utils/escapeRegex.js';
+import { execute, transaction } from '../config/db.js';
+import { countRecords, findRecord, mapRow, tableName } from '../models/index.js';
 import { ApiError } from '../utils/ApiError.js';
 
 const searchable = {
@@ -8,69 +8,86 @@ const searchable = {
   projects: ['title', 'summary', 'team'], resources: ['title', 'description', 'category'], registrations: ['name', 'email', 'eventTitle'],
   messages: ['name', 'email', 'subject', 'message'], users: ['name', 'email', 'role'],
 };
-const sortOptions = { date: { date: -1 }, dateAsc: { date: 1 }, createdAt: { createdAt: -1 } };
+const sortOptions = { date: 'date DESC', dateAsc: 'date ASC', createdAt: 'createdAt DESC' };
 const allowedFilters = ['category', 'designation', 'type', 'status', 'role'];
-const andFilter = (filter, condition) => {
-  if (filter.$or) {
-    filter.$and = [{ $or: filter.$or }, condition];
-    delete filter.$or;
-  } else Object.assign(filter, condition);
-};
 
 export function modelFor(resource) {
-  const Model = collections[resource];
-  if (!Model) throw new ApiError(404, 'Resource not found.');
-  return Model;
+  try { return tableName(resource); } catch { throw new ApiError(404, 'Resource not found.'); }
 }
 
 export async function listRecords(resource, req) {
-  const Model = modelFor(resource);
+  const table = modelFor(resource);
   const page = Math.max(1, Math.floor(Number(req.query.page) || 1));
   const limit = Math.min(50, Math.max(1, Math.floor(Number(req.query.limit) || 10)));
-  const filter = {};
+  const conditions = [];
+  const args = [];
   if (req.query.q) {
-    const regex = new RegExp(escapeRegex(String(req.query.q).slice(0, 100)), 'i');
-    filter.$or = (searchable[resource] || []).map((field) => ({ [field]: regex }));
+    const pattern = `%${String(req.query.q).slice(0, 100).replace(/[!%_]/g, '!$&')}%`;
+    const searchFields = searchable[resource] || [];
+    conditions.push(`(${searchFields.map((field) => `LOWER(COALESCE(${field}, '')) LIKE LOWER(?) ESCAPE '!'`).join(' OR ')})`);
+    args.push(...searchFields.map(() => pattern));
   }
   for (const field of allowedFilters) {
-    if (req.query[field] && req.query[field] !== 'all') filter[field] = String(req.query[field]).slice(0, 100);
+    if (req.query[field] && req.query[field] !== 'all') {
+      conditions.push(`${field} = ?`);
+      args.push(String(req.query[field]).slice(0, 100));
+    }
   }
-  if (req.query.upcoming === 'true' || req.query.upcoming === 'false') filter.date = { [req.query.upcoming === 'true' ? '$gte' : '$lt']: new Date() };
+  if (req.query.upcoming === 'true' || req.query.upcoming === 'false') {
+    conditions.push(`date ${req.query.upcoming === 'true' ? '>=' : '<'} ?`);
+    args.push(new Date().toISOString());
+  }
   if (resource === 'notices') {
-    if (!['admin', 'faculty'].includes(req.user?.role)) filter.status = 'published';
-    else if (req.user.role === 'faculty') andFilter(filter, { $or: [{ status: 'published' }, { status: 'pending', createdBy: req.user._id }] });
+    if (!['admin', 'faculty'].includes(req.user?.role)) conditions.push("status = 'published'");
+    else if (req.user.role === 'faculty') {
+      conditions.push("(status = 'published' OR (status = 'pending' AND createdBy = ?))");
+      args.push(String(req.user._id));
+    }
   }
   if (resource === 'resources') {
-    if (!['admin', 'faculty'].includes(req.user?.role)) filter.status = 'published';
-    else if (req.user.role === 'faculty') andFilter(filter, { $or: [{ status: 'published' }, { status: 'pending', createdBy: req.user._id }] });
+    if (!['admin', 'faculty'].includes(req.user?.role)) conditions.push("status = 'published'");
+    else if (req.user.role === 'faculty') {
+      conditions.push("(status = 'published' OR (status = 'pending' AND createdBy = ?))");
+      args.push(String(req.user._id));
+    }
   }
   if (resource === 'projects') {
-    if (!['admin', 'faculty'].includes(req.user?.role)) filter.status = 'approved';
-    else if (req.user.role === 'faculty') andFilter(filter, { $or: [{ status: 'approved' }, { submittedBy: req.user._id }] });
+    if (!['admin', 'faculty'].includes(req.user?.role)) conditions.push("status = 'approved'");
+    else if (req.user.role === 'faculty') {
+      conditions.push("(status = 'approved' OR submittedBy = ?)");
+      args.push(String(req.user._id));
+    }
   }
-  const sort = resource === 'notices' ? { pinned: -1, date: -1 } : (sortOptions[req.query.sort] || { createdAt: -1 });
-  const [foundRows, total] = await Promise.all([
-    Model.find(filter).sort(sort).skip((page - 1) * limit).limit(limit).select(resource === 'users' ? '-passwordHash' : undefined).lean(),
-    Model.countDocuments(filter),
+  const where = conditions.length ? conditions.join(' AND ') : '';
+  const sort = resource === 'notices' ? 'pinned DESC, date DESC' : (sortOptions[req.query.sort] || 'createdAt DESC');
+  const [result, total] = await Promise.all([
+    execute({ sql: `SELECT * FROM ${table}${where ? ` WHERE ${where}` : ''} ORDER BY ${sort} LIMIT ? OFFSET ?`, args: [...args, limit, (page - 1) * limit] }),
+    countRecords(resource, { where, args }),
   ]);
-  const rows = resource === 'users'
-    ? foundRows.map((row) => ({ ...row, accountStatus: row.accountStatus || 'approved' }))
-    : foundRows;
+  const rows = result.rows.map((row) => mapRow(resource, row));
   return { data: rows, meta: { page, limit, total, pages: Math.max(1, Math.ceil(total / limit)) } };
 }
 
 export async function getRecord(resource, id) {
-  const row = await modelFor(resource).findById(id).select(resource === 'users' ? '-passwordHash' : undefined).lean();
+  modelFor(resource);
+  const row = await findRecord(resource, id);
   if (!row) throw new ApiError(404, 'Record not found.');
   return row;
 }
 
 export async function deleteRecord(resource, id) {
-  const Model = modelFor(resource);
-  const row = await Model.findById(id);
-  if (!row) throw new ApiError(404, 'Record not found.');
-  if (resource === 'events') await collections.registrations.deleteMany({ event: row._id });
-  if (resource === 'registrations') await collections.events.updateOne({ _id: row.event, registeredCount: { $gt: 0 } }, { $inc: { registeredCount: -1 } });
-  await row.deleteOne();
-  return { _id: id };
+  const table = modelFor(resource);
+  const tx = await transaction();
+  try {
+    const row = await findRecord(resource, id, { executor: tx });
+    if (!row) throw new ApiError(404, 'Record not found.');
+    if (resource === 'events') await tx.execute({ sql: 'DELETE FROM registrations WHERE event = ?', args: [String(id)] });
+    if (resource === 'registrations') await tx.execute({ sql: 'UPDATE events SET registeredCount = MAX(0, registeredCount - 1), updatedAt = ? WHERE id = ?', args: [new Date().toISOString(), row.event] });
+    await tx.execute({ sql: `DELETE FROM ${table} WHERE id = ?`, args: [String(id)] });
+    await tx.commit();
+    return { _id: String(id) };
+  } catch (error) {
+    await tx.rollback();
+    throw error;
+  }
 }

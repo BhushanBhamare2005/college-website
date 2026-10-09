@@ -1,6 +1,6 @@
 import bcrypt from 'bcryptjs';
 import { connectDatabase, disconnectDatabase } from '../src/config/db.js';
-import { User } from '../src/models/index.js';
+import { findByField, updateRecord } from '../src/models/index.js';
 
 const email = String(process.env.ADMIN_EMAIL || '').trim().toLowerCase();
 const password = process.env.ADMIN_PASSWORD || '';
@@ -10,9 +10,10 @@ if (!email || password.length < 8) {
 }
 
 try {
-  await connectDatabase(process.env.MONGO_URI);
-  const result = await User.updateOne({ email }, { $set: { passwordHash: await bcrypt.hash(password, 12) } });
-  if (!result.matchedCount) throw new Error(`No account found for ${email}.`);
+  await connectDatabase();
+  const user = await findByField('users', 'email', email);
+  if (!user) throw new Error(`No account found for ${email}.`);
+  await updateRecord('users', user._id, { passwordHash: await bcrypt.hash(password, 12) });
   console.info(`Password updated for ${email}.`);
 } catch (error) {
   console.error('Could not update administrator password:', error.message);

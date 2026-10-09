@@ -1,83 +1,121 @@
-import mongoose from 'mongoose';
+import { randomUUID } from 'node:crypto';
+import { execute } from '../config/db.js';
 
-const { Schema, model, models } = mongoose;
-const opts = { timestamps: true, strict: true, versionKey: false };
-const textIndex = (schema, fields) => schema.index(Object.fromEntries(fields.map((field) => [field, 'text'])));
+const columns = {
+  users: ['name', 'email', 'passwordHash', 'role', 'accountStatus', 'mustChangePassword'],
+  faculty: ['name', 'designation', 'qualification', 'specialization', 'email', 'experience', 'bio', 'photoUrl', 'user', 'isDemo'],
+  courses: ['name', 'duration', 'level', 'description', 'subjects', 'isDemo'],
+  labs: ['name', 'description', 'equipment', 'incharge', 'isDemo'],
+  notices: ['title', 'category', 'description', 'date', 'pinned', 'attachmentUrl', 'status', 'createdBy', 'isDemo'],
+  events: ['title', 'type', 'date', 'deadline', 'venue', 'capacity', 'registeredCount', 'description', 'bannerUrl', 'isDemo'],
+  registrations: ['event', 'eventTitle', 'name', 'email', 'department', 'user', 'isDemo'],
+  projects: ['type', 'title', 'team', 'summary', 'link', 'documentUrl', 'status', 'submittedBy', 'isDemo'],
+  resources: ['title', 'category', 'description', 'url', 'status', 'createdBy', 'isDemo'],
+  messages: ['name', 'email', 'subject', 'message', 'read', 'isDemo'],
+};
+const dateFields = new Set(['date', 'deadline', 'createdAt', 'updatedAt']);
+const booleanFields = new Set(['mustChangePassword', 'pinned', 'isDemo', 'read']);
+const jsonFields = new Set(['subjects', 'equipment']);
+const defaults = {
+  users: { role: 'student', accountStatus: 'approved', mustChangePassword: false },
+  faculty: { isDemo: false },
+  courses: { subjects: [], isDemo: false },
+  labs: { equipment: [], isDemo: false },
+  notices: { date: () => new Date(), pinned: false, status: 'published', isDemo: false },
+  events: { capacity: 0, registeredCount: 0, isDemo: false },
+  registrations: { isDemo: false },
+  projects: { status: 'pending', isDemo: false },
+  resources: { status: 'published', isDemo: false },
+  messages: { read: false, isDemo: false },
+};
 
-const userSchema = new Schema({
-  name: { type: String, required: true, trim: true, minlength: 2, maxlength: 120 },
-  email: { type: String, required: true, unique: true, lowercase: true, trim: true, index: true },
-  passwordHash: { type: String, required: true, select: false },
-  role: { type: String, enum: ['admin', 'faculty', 'student'], required: true, default: 'student' },
-  accountStatus: { type: String, enum: ['pending', 'approved', 'rejected'], default: 'approved', index: true },
-  mustChangePassword: { type: Boolean, default: false },
-}, opts);
-const facultySchema = new Schema({
-  name: { type: String, required: true, trim: true }, designation: { type: String, required: true },
-  qualification: { type: String, required: true }, specialization: { type: String, required: true },
-  email: { type: String, lowercase: true, trim: true, unique: true, sparse: true }, experience: String,
-  bio: String, photoUrl: String, user: { type: Schema.Types.ObjectId, ref: 'User', default: null },
-}, opts);
-const courseSchema = new Schema({ name: { type: String, required: true }, duration: String, level: String, description: String, subjects: [String] }, opts);
-const labSchema = new Schema({ name: { type: String, required: true }, description: String, equipment: [String], incharge: String }, opts);
-const noticeSchema = new Schema({
-  title: { type: String, required: true }, category: { type: String, required: true }, description: String,
-  date: { type: Date, default: Date.now }, pinned: { type: Boolean, default: false }, attachmentUrl: String,
-  status: { type: String, enum: ['pending', 'published', 'rejected'], default: 'published', index: true },
-  createdBy: { type: Schema.Types.ObjectId, ref: 'User', default: null },
-}, opts);
-const eventSchema = new Schema({
-  title: { type: String, required: true }, type: { type: String, required: true }, date: { type: Date, required: true },
-  deadline: { type: Date, required: true }, venue: { type: String, required: true }, capacity: { type: Number, min: 0, default: 0 },
-  registeredCount: { type: Number, min: 0, default: 0 }, description: String, bannerUrl: String,
-}, opts);
-const registrationSchema = new Schema({
-  event: { type: Schema.Types.ObjectId, ref: 'Event', required: true }, eventTitle: { type: String, required: true },
-  name: { type: String, required: true, trim: true }, email: { type: String, required: true, lowercase: true, trim: true },
-  department: String, user: { type: Schema.Types.ObjectId, ref: 'User', default: null },
-}, opts);
-registrationSchema.index({ event: 1, email: 1 }, { unique: true });
-const projectSchema = new Schema({
-  type: { type: String, enum: ['project', 'achievement'], required: true }, title: { type: String, required: true },
-  team: { type: String, required: true }, summary: { type: String, required: true }, link: String, documentUrl: String,
-  status: { type: String, enum: ['pending', 'approved', 'rejected'], default: 'pending', index: true },
-  submittedBy: { type: Schema.Types.ObjectId, ref: 'User', default: null },
-}, opts);
-const resourceSchema = new Schema({
-  title: { type: String, required: true }, category: { type: String, required: true }, description: String,
-  url: String, status: { type: String, enum: ['pending', 'published', 'rejected'], default: 'published', index: true },
-  createdBy: { type: Schema.Types.ObjectId, ref: 'User', default: null },
-}, opts);
-const messageSchema = new Schema({
-  name: { type: String, required: true }, email: { type: String, required: true, lowercase: true, trim: true },
-  subject: { type: String, required: true }, message: { type: String, required: true }, read: { type: Boolean, default: false },
-}, opts);
+export const tableName = (resource) => {
+  if (!columns[resource]) throw new Error('Unknown database resource.');
+  return resource;
+};
 
-for (const schema of [facultySchema, courseSchema, labSchema, noticeSchema, eventSchema, registrationSchema, projectSchema, resourceSchema, messageSchema]) {
-  schema.add({ isDemo: { type: Boolean, default: false } });
+export function mapRow(resource, row, { includeSensitive = false } = {}) {
+  if (!row) return null;
+  const mapped = { ...row, _id: row.id };
+  delete mapped.id;
+  if (resource === 'users' && !includeSensitive) delete mapped.passwordHash;
+  for (const field of dateFields) {
+    if (mapped[field]) mapped[field] = new Date(mapped[field]);
+  }
+  for (const field of booleanFields) {
+    if (field in mapped) mapped[field] = Boolean(mapped[field]);
+  }
+  for (const field of jsonFields) {
+    if (typeof mapped[field] === 'string') mapped[field] = JSON.parse(mapped[field]);
+  }
+  return mapped;
 }
 
-textIndex(facultySchema, ['name', 'specialization', 'designation']);
-textIndex(courseSchema, ['name', 'description']);
-textIndex(labSchema, ['name', 'description']);
-textIndex(resourceSchema, ['title', 'description']);
-noticeSchema.index({ pinned: -1, date: -1 });
-eventSchema.index({ date: 1 });
-messageSchema.index({ createdAt: -1 });
+function toDatabaseValue(field, value) {
+  if (value instanceof Date) return value.toISOString();
+  if (dateFields.has(field) && value) return new Date(value).toISOString();
+  if (booleanFields.has(field)) return value ? 1 : 0;
+  if (jsonFields.has(field)) return JSON.stringify(value);
+  return value;
+}
 
-const define = (name, schema) => models[name] || model(name, schema);
-export const User = define('User', userSchema);
-export const Faculty = define('Faculty', facultySchema);
-export const Course = define('Course', courseSchema);
-export const Lab = define('Lab', labSchema);
-export const Notice = define('Notice', noticeSchema);
-export const Event = define('Event', eventSchema);
-export const EventRegistration = define('EventRegistration', registrationSchema);
-export const Project = define('Project', projectSchema);
-export const Resource = define('Resource', resourceSchema);
-export const ContactMessage = define('ContactMessage', messageSchema);
+export async function findRecord(resource, id, { includeSensitive = false, executor = null } = {}) {
+  const table = tableName(resource);
+  const result = await (executor || { execute }).execute({
+    sql: `SELECT * FROM ${table} WHERE id = ? LIMIT 1`,
+    args: [String(id)],
+  });
+  return mapRow(resource, result.rows[0], { includeSensitive });
+}
 
-export const collections = {
-  faculty: Faculty, courses: Course, labs: Lab, notices: Notice, events: Event,
-  registrations: EventRegistration, projects: Project, resources: Resource, messages: ContactMessage, users: User,
-};
+export async function findByField(resource, field, value, { includeSensitive = false, executor = null } = {}) {
+  const table = tableName(resource);
+  if (field !== 'id' && !columns[resource].includes(field)) throw new Error('Unknown database field.');
+  const result = await (executor || { execute }).execute({
+    sql: `SELECT * FROM ${table} WHERE ${field} = ? LIMIT 1`,
+    args: [toDatabaseValue(field, value)],
+  });
+  return mapRow(resource, result.rows[0], { includeSensitive });
+}
+
+export async function createRecord(resource, values, { executor = null } = {}) {
+  const table = tableName(resource);
+  const now = new Date().toISOString();
+  const input = { ...Object.fromEntries(Object.entries(defaults[resource] || {}).map(([field, value]) => [field, typeof value === 'function' ? value() : value])), ...values };
+  const id = String(input._id || randomUUID());
+  delete input._id;
+  const record = { id, ...input, createdAt: input.createdAt || now, updatedAt: input.updatedAt || now };
+  const allowed = columns[resource].filter((field) => record[field] !== undefined);
+  const names = ['id', ...allowed, 'createdAt', 'updatedAt'];
+  const args = [id, ...allowed.map((field) => toDatabaseValue(field, record[field])), toDatabaseValue('createdAt', record.createdAt), toDatabaseValue('updatedAt', record.updatedAt)];
+  await (executor || { execute }).execute({
+    sql: `INSERT INTO ${table} (${names.join(', ')}) VALUES (${names.map(() => '?').join(', ')})`,
+    args,
+  });
+  return findRecord(resource, id, { includeSensitive: true, executor });
+}
+
+export async function updateRecord(resource, id, values, { executor = null } = {}) {
+  const table = tableName(resource);
+  const allowed = columns[resource].filter((field) => values[field] !== undefined);
+  if (!allowed.length) return findRecord(resource, id, { includeSensitive: true, executor });
+  const now = new Date().toISOString();
+  const assignments = [...allowed.map((field) => `${field} = ?`), 'updatedAt = ?'];
+  const args = [...allowed.map((field) => toDatabaseValue(field, values[field])), now, String(id)];
+  await (executor || { execute }).execute({ sql: `UPDATE ${table} SET ${assignments.join(', ')} WHERE id = ?`, args });
+  return findRecord(resource, id, { includeSensitive: true, executor });
+}
+
+export async function countRecords(resource, { where = '', args = [], executor = null } = {}) {
+  const table = tableName(resource);
+  const result = await (executor || { execute }).execute({
+    sql: `SELECT COUNT(*) AS total FROM ${table}${where ? ` WHERE ${where}` : ''}`,
+    args,
+  });
+  return Number(result.rows[0].total);
+}
+
+export function isUniqueViolation(error) {
+  return String(error?.code || '').includes('CONSTRAINT_UNIQUE')
+    || String(error?.message || '').includes('UNIQUE constraint failed');
+}

@@ -34,7 +34,7 @@ export const seed = {
   ],
   labs: [
     { _id: 'l1', name: 'Electronics Lab (sample)', description: 'Sample entry. Replace with the department\'s actual laboratory description.', equipment: ['Oscilloscopes', 'Function generators', 'Trainer kits'], incharge: 'To be updated', isDemo: true },
-    { _id: 'l2', name: 'Computer Lab (sample)', description: 'Sample entry for programming and software project work.', equipment: ['Desktop systems', 'VS Code', 'Node.js / MongoDB tools'], incharge: 'To be updated', isDemo: true },
+    { _id: 'l2', name: 'Computer Lab (sample)', description: 'Sample entry for programming and software project work.', equipment: ['Desktop systems', 'VS Code', 'Node.js / SQLite tools'], incharge: 'To be updated', isDemo: true },
     { _id: 'l3', name: 'Microprocessor & Embedded Lab (sample)', description: 'Sample entry for microcontroller practicals.', equipment: ['Development boards', 'Sensors', 'Logic analysers'], incharge: 'To be updated', isDemo: true },
   ],
   notices: [

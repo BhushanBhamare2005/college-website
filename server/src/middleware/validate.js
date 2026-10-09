@@ -1,8 +1,7 @@
-import mongoose from 'mongoose';
 import { ApiError } from '../utils/ApiError.js';
 
 export function validateId(req, _res, next) {
-  if (!mongoose.isValidObjectId(req.params.id)) return next(new ApiError(400, 'Invalid record id.'));
+  if (!/^[A-Za-z0-9_-]{1,64}$/.test(req.params.id)) return next(new ApiError(400, 'Invalid record id.'));
   next();
 }
 

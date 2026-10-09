@@ -43,10 +43,10 @@ Simple UI, accurate information, fast response, reliable storage, easy maintenan
 (The class diagram also lists User, Laboratory, Event, Achievement, Contact, Database.)
 
 ## Report's own future scope (7.3) – we implement as enhancements
-Student and faculty login, role-based administrator login, online feedback/forms. Not implemented: e-mail/SMS notifications, cloud DB integration, mobile app (listed as future work).
+Student and faculty login, role-based administrator login, online feedback/forms. Not implemented: e-mail/SMS notifications and a mobile app (listed as future work). Persistent hosted SQL storage is now supported through Turso/libSQL.
 
 ## Stack note
-The report names HTML, CSS, JavaScript, a database and a web server without mandating products. React + Vite (HTML/CSS/JS), Express (web server) and MongoDB (database) from the master prompt fit that description, so no conflict. Layered flow follows 4.1: User → Web Interface → Web Logic → Database → Response.
+The report names HTML, CSS, JavaScript, a database and a web server without mandating products. React + Vite (HTML/CSS/JS), Express (web server), and SQLite locally with hosted Turso/libSQL in production fit that description. Layered flow follows 4.1: User → Web Interface → Web Logic → Database → Response.
 
 ## Beyond the report
 Laboratories and Achievements are in the report but absent from the master prompt's page list; they are added as first-class pages/modules.

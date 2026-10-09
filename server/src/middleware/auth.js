@@ -1,5 +1,5 @@
 import jwt from 'jsonwebtoken';
-import { User } from '../models/index.js';
+import { findRecord } from '../models/index.js';
 import { env } from '../config/env.js';
 import { ApiError } from '../utils/ApiError.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
@@ -18,7 +18,7 @@ export const requireAuth = asyncHandler(async (req, _res, next) => {
   let payload;
   try { payload = jwt.verify(token, env.JWT_SECRET, { algorithms: ['HS256'] }); }
   catch { throw new ApiError(401, 'Please sign in to continue.'); }
-  const user = await User.findById(payload.sub).select('_id name email role accountStatus mustChangePassword');
+  const user = await findRecord('users', payload.sub);
   if (!user) throw new ApiError(401, 'Please sign in to continue.');
   req.user = user;
   next();
@@ -29,7 +29,7 @@ export const optionalAuth = asyncHandler(async (req, _res, next) => {
   let payload;
   try { payload = jwt.verify(req.cookies.token, env.JWT_SECRET, { algorithms: ['HS256'] }); }
   catch { return next(); }
-  req.user = await User.findById(payload.sub).select('_id name email role accountStatus mustChangePassword');
+  req.user = await findRecord('users', payload.sub);
   next();
 });
 

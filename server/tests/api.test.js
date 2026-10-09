@@ -1,28 +1,20 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import request from 'supertest';
 import bcrypt from 'bcryptjs';
-import mongoose from 'mongoose';
-import { MongoMemoryServer } from 'mongodb-memory-server';
 import { app } from '../src/app.js';
-import { connectDatabase, disconnectDatabase } from '../src/config/db.js';
-import { collections, User } from '../src/models/index.js';
+import { connectDatabase, disconnectDatabase, execute } from '../src/config/db.js';
+import { createRecord, findRecord } from '../src/models/index.js';
 
-let mongo;
 let agent;
 let csrf;
 
-beforeAll(async () => {
-  const uri = process.env.MONGO_URI_TEST;
-  if (uri) await connectDatabase(uri);
-  else {
-    mongo = await MongoMemoryServer.create();
-    await connectDatabase(mongo.getUri());
-  }
-}, 30000);
+beforeAll(connectDatabase);
 
 beforeEach(async () => {
-  await mongoose.connection.dropDatabase();
-  await User.create({ name: 'Test Administrator', email: 'admin@example.test', passwordHash: await bcrypt.hash('Long-Test-Password-123', 12), role: 'admin' });
+  for (const table of ['registrations', 'faculty', 'notices', 'projects', 'resources', 'events', 'courses', 'labs', 'messages', 'users']) {
+    await execute(`DELETE FROM ${table}`);
+  }
+  await createRecord('users', { name: 'Test Administrator', email: 'admin@example.test', passwordHash: await bcrypt.hash('Long-Test-Password-123', 12), role: 'admin' });
   agent = request.agent(app);
   const csrfResponse = await agent.get('/api/auth/csrf').expect(200);
   csrf = csrfResponse.body.data.csrfToken;
@@ -30,7 +22,6 @@ beforeEach(async () => {
 
 afterAll(async () => {
   await disconnectDatabase();
-  await mongo?.stop();
 });
 
 describe('API contract and security', () => {
@@ -98,16 +89,16 @@ describe('API contract and security', () => {
       .send({ email: 'admin@example.test', password: 'Long-Test-Password-123' }).expect(200);
     const invalid = await agent.post('/api/faculty').set('X-CSRF-Token', csrf).send({ name: '' }).expect(400);
     expect(invalid.body.errors.name).toBeTruthy();
-    await agent.get('/api/faculty/not-an-object-id').expect(400);
+    await agent.get('/api/faculty/not.valid').expect(400);
   });
 
   it('registers once and prevents duplicate event registrations', async () => {
-    const event = await collections.events.create({ title: 'Test Event', type: 'Workshop', date: new Date(Date.now() + 86400000 * 4), deadline: new Date(Date.now() + 86400000), venue: 'Hall', capacity: 1 });
+    const event = await createRecord('events', { title: 'Test Event', type: 'Workshop', date: new Date(Date.now() + 86400000 * 4), deadline: new Date(Date.now() + 86400000), venue: 'Hall', capacity: 1 });
     const payload = { name: 'Student One', email: 'student@example.test' };
     await agent.post(`/api/events/${event._id}/register`).set('X-CSRF-Token', csrf).send(payload).expect(201);
     const duplicate = await agent.post(`/api/events/${event._id}/register`).set('X-CSRF-Token', csrf).send(payload).expect(409);
     expect(duplicate.body.message).toContain('already registered');
-    const updated = await collections.events.findById(event._id);
+    const updated = await findRecord('events', event._id);
     expect(updated.registeredCount).toBe(1);
   });
 });

@@ -2,7 +2,7 @@ import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { z } from 'zod';
-import { collections, User } from '../models/index.js';
+import { countRecords, createRecord, findByField, findRecord, isUniqueViolation, updateRecord } from '../models/index.js';
 import { schemas, updateSchemas, contactSchema, loginSchema, passwordSchema, studentSignupSchema } from '../schemas/resources.js';
 import { listRecords, getRecord, deleteRecord, modelFor } from '../services/crud.js';
 import { dashboardStats, publicStats } from '../services/stats.js';
@@ -15,7 +15,7 @@ import { ApiError } from '../utils/ApiError.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { createCsrfToken } from '../utils/tokens.js';
 import { env } from '../config/env.js';
-import { connectDatabase, databaseReady } from '../config/db.js';
+import { connectDatabase, databaseReady, transaction } from '../config/db.js';
 
 const dummyHash = await bcrypt.hash('timing-protection-only', 12);
 
@@ -55,14 +55,14 @@ apiRouter.use(asyncHandler(async (req, _res, next) => {
 
 apiRouter.post('/auth/register', csrfProtection, signupLimiter, validateBody(studentSignupSchema), asyncHandler(async (req, res) => {
   const { name, email, password } = req.validatedBody;
-  if (await User.exists({ email })) throw new ApiError(409, 'An account with this email already exists.');
-  const user = await User.create({ name, email, passwordHash: await bcrypt.hash(password, 12), role: 'student', accountStatus: 'pending' });
+  if (await findByField('users', 'email', email)) throw new ApiError(409, 'An account with this email already exists.');
+  const user = await createRecord('users', { name, email, passwordHash: await bcrypt.hash(password, 12), role: 'student', accountStatus: 'pending' });
   success(res, { _id: user._id, name: user.name, email: user.email, role: user.role, accountStatus: user.accountStatus }, 201);
 }));
 
 apiRouter.post('/auth/login', csrfProtection, loginLimiter, validateBody(loginSchema), asyncHandler(async (req, res) => {
   const { email, password } = req.validatedBody;
-  const user = await User.findOne({ email }).select('+passwordHash name email role accountStatus mustChangePassword');
+  const user = await findByField('users', 'email', email, { includeSensitive: true });
   const valid = await bcrypt.compare(password, user?.passwordHash || dummyHash);
   if (!user || !valid) throw new ApiError(401, 'Invalid email or password.');
   if (user.accountStatus && user.accountStatus !== 'approved') throw new ApiError(403, user.accountStatus === 'rejected' ? 'This account was not approved. Contact the department for help.' : 'Your account is waiting for administrator approval.');
@@ -78,11 +78,9 @@ apiRouter.get('/auth/me', requireAuth, (req, res) => success(res, {
   _id: req.user._id, name: req.user.name, email: req.user.email, role: req.user.role, accountStatus: req.user.accountStatus, mustChangePassword: req.user.mustChangePassword,
 }));
 apiRouter.post('/auth/change-password', csrfProtection, requireAuth, validateBody(passwordSchema), asyncHandler(async (req, res) => {
-  const user = await User.findById(req.user._id).select('+passwordHash');
+  const user = await findRecord('users', req.user._id, { includeSensitive: true });
   if (!await bcrypt.compare(req.validatedBody.currentPassword, user.passwordHash)) throw new ApiError(400, 'Current password is incorrect.', { currentPassword: 'Current password is incorrect.' });
-  user.passwordHash = await bcrypt.hash(req.validatedBody.newPassword, 12);
-  user.mustChangePassword = false;
-  await user.save();
+  await updateRecord('users', user._id, { passwordHash: await bcrypt.hash(req.validatedBody.newPassword, 12), mustChangePassword: false });
   success(res, { changed: true });
 }));
 
@@ -92,34 +90,40 @@ apiRouter.get('/dashboard/stats', requireAuth, requireRole('admin', 'faculty'), 
 apiRouter.post('/contact', csrfProtection, contactLimiter, validateBody(contactSchema), asyncHandler(async (req, res) => {
   const { website, ...values } = req.validatedBody;
   if (website) return success(res, { received: true }, 201);
-  await collections.messages.create(values);
+  await createRecord('messages', values);
   success(res, { received: true }, 201);
 }));
 
 apiRouter.put('/faculty/me', csrfProtection, requireAuth, requireRole('faculty', 'admin'), validateBody(facultyProfileSchema), asyncHandler(async (req, res) => {
-  const profile = await collections.faculty.findOneAndUpdate({ user: req.user._id }, req.validatedBody, { new: true, runValidators: true });
+  const profile = await findByField('faculty', 'user', req.user._id);
   if (!profile) throw new ApiError(404, 'No faculty profile is linked to this account.');
-  success(res, profile);
+  success(res, await updateRecord('faculty', profile._id, req.validatedBody));
 }));
 
 apiRouter.post('/events/:id/register', csrfProtection, registrationLimiter, validateId, optionalAuth, validateBody(schemas.registrations), asyncHandler(async (req, res) => {
-  const event = await collections.events.findById(req.params.id);
-  if (!event) throw new ApiError(404, 'Event not found.');
-  if (event.deadline < new Date()) throw new ApiError(400, 'Registration for this event has closed.');
-  if (await collections.registrations.exists({ event: event._id, email: req.validatedBody.email })) throw new ApiError(409, 'This email is already registered for this event.');
-  const eventFilter = { _id: event._id, deadline: { $gte: new Date() } };
-  if (event.capacity > 0) eventFilter.registeredCount = { $lt: event.capacity };
-  const updated = await collections.events.findOneAndUpdate(eventFilter, { $inc: { registeredCount: 1 } }, { new: true });
-  if (!updated) {
-    if (await collections.registrations.exists({ event: event._id, email: req.validatedBody.email })) throw new ApiError(409, 'This email is already registered for this event.');
-    throw new ApiError(409, 'This event is full or registration has closed.');
-  }
+  const tx = await transaction();
+  let committed = false;
   try {
-    const registration = await collections.registrations.create({ ...req.validatedBody, event: event._id, eventTitle: event.title, user: req.user?._id || null });
+    const event = await findRecord('events', req.params.id, { executor: tx });
+    if (!event) throw new ApiError(404, 'Event not found.');
+    const now = new Date();
+    if (event.deadline < now) throw new ApiError(400, 'Registration for this event has closed.');
+    const duplicate = await tx.execute({ sql: 'SELECT id FROM registrations WHERE event = ? AND email = ? LIMIT 1', args: [event._id, req.validatedBody.email] });
+    if (duplicate.rows.length) throw new ApiError(409, 'This email is already registered for this event.');
+    const updated = await tx.execute({
+      sql: 'UPDATE events SET registeredCount = registeredCount + 1, updatedAt = ? WHERE id = ? AND deadline >= ? AND (capacity = 0 OR registeredCount < capacity)',
+      args: [now.toISOString(), event._id, now.toISOString()],
+    });
+    if (!updated.rowsAffected) throw new ApiError(409, 'This event is full or registration has closed.');
+    const registration = await createRecord('registrations', {
+      ...req.validatedBody, event: event._id, eventTitle: event.title, user: req.user?._id || null,
+    }, { executor: tx });
+    await tx.commit();
+    committed = true;
     success(res, registration, 201);
   } catch (error) {
-    await collections.events.updateOne({ _id: event._id, registeredCount: { $gt: 0 } }, { $inc: { registeredCount: -1 } });
-    if (error.code === 11000) throw new ApiError(409, 'This email is already registered for this event.');
+    if (!committed) await tx.rollback();
+    if (isUniqueViolation(error)) throw new ApiError(409, 'This email is already registered for this event.');
     throw error;
   }
 }));
@@ -138,7 +142,7 @@ apiRouter.post('/uploads/:kind', csrfProtection, requireAuth, asyncHandler(async
 const resources = ['faculty', 'courses', 'labs', 'notices', 'events', 'projects', 'resources', 'registrations', 'messages', 'users'];
 for (const resource of resources) {
   const base = `/${resource}`;
-  const Model = modelFor(resource);
+  modelFor(resource);
   const privateRoute = adminOnly.has(resource);
   const readGate = privateRoute ? [requireAuth, requireRole('admin')] : [optionalAuth];
   const writeGate = adminWrite.has(resource) ? [requireAuth, requireRole('admin')] : [requireAuth, requireRole('admin', 'faculty', ...(resource === 'projects' ? ['student'] : []))];
@@ -163,21 +167,24 @@ for (const resource of resources) {
     }
     if (resource === 'projects' && req.user.role !== 'admin') { values.status = 'pending'; values.submittedBy = req.user._id; }
     if (['notices', 'resources'].includes(resource)) { values.status = req.user.role === 'admin' ? (values.status || 'published') : 'pending'; values.createdBy = req.user._id; }
-    const record = await Model.create(values);
+    const record = await createRecord(resource, values);
     if (resource === 'faculty') {
-      const linkedUser = await User.findOne({ email: record.email });
-      if (linkedUser) { record.user = linkedUser._id; await record.save(); }
+      const linkedUser = await findByField('users', 'email', record.email);
+      if (linkedUser) await updateRecord(resource, record._id, { user: linkedUser._id });
     }
-    if (resource === 'users' && record.role === 'faculty') await collections.faculty.updateOne({ email: record.email }, { $set: { user: record._id } });
-    const output = resource === 'users' ? await Model.findById(record._id).select('-passwordHash').lean() : record;
+    if (resource === 'users' && record.role === 'faculty') {
+      const faculty = await findByField('faculty', 'email', record.email);
+      if (faculty) await updateRecord('faculty', faculty._id, { user: record._id });
+    }
+    const output = resource === 'users' ? await findRecord(resource, record._id) : record;
     success(res, output, 201);
   }));
   apiRouter.put(`${base}/:id`, csrfProtection, ...writeGate, validateId, validateBody(updateSchemas[resource]), asyncHandler(async (req, res) => {
-    const record = await Model.findById(req.params.id);
+    const record = await findRecord(resource, req.params.id, { includeSensitive: resource === 'users' });
     if (!record) throw new ApiError(404, 'Record not found.');
     if (resource === 'users' && String(record._id) === String(req.user._id) && req.validatedBody.role && req.validatedBody.role !== record.role) throw new ApiError(403, 'You cannot change your own role.');
     if (resource === 'users' && req.validatedBody.accountStatus && record.role !== 'student') throw new ApiError(403, 'Only student accounts can be approved or rejected.');
-    if (resource === 'users' && record.role === 'admin' && req.validatedBody.role && req.validatedBody.role !== 'admin' && await User.countDocuments({ role: 'admin' }) <= 1) throw new ApiError(409, 'The last administrator cannot be demoted.');
+    if (resource === 'users' && record.role === 'admin' && req.validatedBody.role && req.validatedBody.role !== 'admin' && await countRecords('users', { where: "role = 'admin'" }) <= 1) throw new ApiError(409, 'The last administrator cannot be demoted.');
     if (['notices', 'resources'].includes(resource) && req.user.role !== 'admin' && (String(record.createdBy) !== String(req.user._id) || record.status !== 'pending')) throw new ApiError(403, 'You can only edit your own pending submission.');
     if (resource === 'projects' && req.user.role !== 'admin' && req.user.role !== 'faculty' && String(record.submittedBy) !== String(req.user._id)) throw new ApiError(403, 'You can only edit your own submission.');
     const values = { ...req.validatedBody };
@@ -185,20 +192,19 @@ for (const resource of resources) {
     if (resource === 'users') { delete values.password; }
     if (['notices', 'resources'].includes(resource) && req.user.role !== 'admin') delete values.status;
     if (resource === 'projects' && req.user.role !== 'admin' && req.user.role !== 'faculty') { delete values.status; }
-    Object.assign(record, values);
-    await record.save();
-    const output = resource === 'users' ? await Model.findById(record._id).select('-passwordHash').lean() : record;
+    const updated = await updateRecord(resource, record._id, values);
+    const output = resource === 'users' ? await findRecord(resource, updated._id) : updated;
     success(res, output);
   }));
   apiRouter.delete(`${base}/:id`, csrfProtection, requireAuth, ...(resource === 'notices' || resource === 'resources' ? [requireRole('admin', 'faculty')] : [requireRole('admin')]), validateId, asyncHandler(async (req, res) => {
     if (['notices', 'resources'].includes(resource) && req.user.role !== 'admin') {
-      const record = await Model.findById(req.params.id);
+      const record = await findRecord(resource, req.params.id);
       if (!record || String(record.createdBy) !== String(req.user._id) || record.status !== 'pending') throw new ApiError(403, 'You can only delete your own pending submission.');
     }
     if (resource === 'users' && String(req.params.id) === String(req.user._id)) throw new ApiError(409, 'You cannot delete your own account.');
     if (resource === 'users') {
-      const target = await User.findById(req.params.id);
-      if (target?.role === 'admin' && await User.countDocuments({ role: 'admin' }) <= 1) throw new ApiError(409, 'The last administrator cannot be deleted.');
+      const target = await findRecord('users', req.params.id);
+      if (target?.role === 'admin' && await countRecords('users', { where: "role = 'admin'" }) <= 1) throw new ApiError(409, 'The last administrator cannot be deleted.');
     }
     success(res, await deleteRecord(resource, req.params.id));
   }));

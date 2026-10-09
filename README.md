@@ -9,10 +9,10 @@ Team: Sagar Hukumdar, Sohan Kharate, Yash Khanderay, Arvind Chavan, Achal Kalamk
 |---|---|
 | **Frontend** (`client/`) — React + Vite + Tailwind | ✅ Built. Production build succeeds; 10 automated tests pass (Vitest + React Testing Library). |
 | Demo mode (in-browser sample data) | ✅ Works, so the UI can be demonstrated without a backend. Nothing is saved; data resets on reload. |
-| **Backend** (`server/` — Express, MongoDB, JWT, uploads) | ✅ Implemented; configure MongoDB and secrets locally before running. |
+| **Backend** (`server/` — Express, SQLite/libSQL, JWT, uploads) | ✅ Implemented; SQLite runs locally, hosted SQL is required for production. |
 | File/image uploads | ✅ API route implemented with content checks; forms can be connected as a follow-up. |
 | Real authentication, CSRF, rate limiting, Helmet | ✅ Implemented for real API mode. Demo-mode logins remain browser-only. |
-| Backend tests and seed scripts | ✅ Added; tests use an in-memory MongoDB or `MONGO_URI_TEST`. |
+| Backend tests and seed scripts | ✅ Added; tests use isolated in-memory SQLite. |
 
 Nothing in demo mode is official college data. Items marked **Sample** are placeholders. Department contact details shown on the site are the address, email and phone supplied for this project.
 
@@ -32,10 +32,10 @@ Other commands: `npm test` (tests), `npm run build` (production build).
 ### Switching to the real backend
 In `client/.env` set `VITE_USE_MOCK=false` and `VITE_API_URL=http://localhost:5000/api`. Authentication will use an HTTP-only cookie; the frontend never stores tokens in localStorage.
 
-See [`server/README.md`](server/README.md) for MongoDB setup, admin seeding, backend tests, uploads, and deployment security notes.
+See [`server/README.md`](server/README.md) for local SQLite setup, Turso production deployment, admin seeding, backend tests, uploads, and security notes.
 
 ### Vercel preview deployment
-The `client/vercel.json` configuration deploys the frontend in demo mode so the public preview works without exposing a local API or database. Demo data is in-memory and is not saved. To use real accounts and persistent data, deploy the server to a public Node host, use an externally reachable MongoDB database, then set `VITE_USE_MOCK=false` and `VITE_API_URL` to that API URL in Vercel project settings.
+The `client/vercel.json` configuration keeps the frontend in demo mode until the API is connected to a persistent hosted SQL database. Demo data is in-memory and is not saved. To use real accounts and persistent data, configure Turso credentials on the server's Vercel project, verify the API health check reports a connected database, then set the frontend Production variables `VITE_USE_MOCK=false` and `VITE_API_URL` to the API origin plus `/api` and redeploy.
 
 ## What the frontend contains
 - **Public pages:** Home, About, Faculty (search, filter, profile pages), Academics (courses, laboratories, study material), Notices (search, category filter, pagination, pinned), Events (upcoming/past, registration form, duplicate prevention in demo), Student Corner (projects, achievements, resources, links), Contact (validated form), Login.
